@@ -1,0 +1,6 @@
+[package]
+name = "regex"
+version = "0.1.0"
+authors = ["Tyler Hardin <th020394@gmail.com>"]
+
+[dependencies]
