@@ -76,22 +76,17 @@ impl Regex {
         };
 
         let mut done = false;
-        let mut alt_idx = 0;
-
         while !done {
             match itr.next() {
                 Some(c) if c == '(' => {
                     // Parse this nested group.
                     *num += 1;
                     let new_grp = Regex::parse(itr, num, false);
-                    grp.alt.alts[alt_idx].push_grp(new_grp);
+                    grp.get_seq().push_grp(new_grp);
                 }
                 Some(c) if c == '|' => {
                     // Create a new alternative sequence.
-                    grp.alt.alts.push(SeqNode {
-                        nodes : Vec::new()
-                    });
-                    alt_idx += 1;
+                    grp.add_alt();
                 }
                 Some(c) if c == ')' => {
                     // lparens should always be removed by the
@@ -106,16 +101,18 @@ impl Regex {
                 Some(c) if c == '*' => {
                     // Pop the previous node and nest it under a
                     // repeat node.
-                    let n = grp.alt.alts[alt_idx].pop();
+                    let n = grp.get_seq()
+                        .pop()
+                        .expect("Syntax error. * requires a preceeding node");
                     let rpt = Box::new(RptNode {
                         node : n
                     });
-                    grp.alt.alts[alt_idx].push(rpt);
+                    grp.get_seq().push(rpt);
                 }
                 Some(c) => {
                     // Simple character. Just push it on the
                     // current senquence.
-                    grp.alt.alts[alt_idx].push_char(c);
+                    grp.get_seq().push_char(c);
                 }
                 // We're done!
                 None => { done = true; }
@@ -303,6 +300,19 @@ impl Node for SeqNode {
         }
 
         return s;
+    }
+}
+
+impl GrpNode {
+    fn add_alt(&mut self) {
+        self.alt.alts.push(SeqNode {
+            nodes : Vec::new()
+        });
+    }
+
+    fn get_seq(&mut self) -> &mut SeqNode {
+        let len = self.alt.alts.len();
+        return self.alt.alts.get_mut(len - 1).expect("");
     }
 }
 
