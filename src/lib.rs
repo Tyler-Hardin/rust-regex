@@ -75,30 +75,29 @@ impl Regex {
             }
         };
 
-        let mut done = false;
-        while !done {
-            match itr.next() {
-                Some(c) if c == '(' => {
+        while let Some(c) = itr.next() {
+            match c {
+                '(' => {
                     // Parse this nested group.
                     *num += 1;
                     let new_grp = Regex::parse(itr, num, false);
                     grp.get_seq().push_grp(new_grp);
                 }
-                Some(c) if c == '|' => {
+                '|' => {
                     // Create a new alternative sequence.
                     grp.add_alt();
                 }
-                Some(c) if c == ')' => {
+                ')' => {
                     // lparens should always be removed by the
                     // subgroup parse. So this must be an error.
                     if root {
                         panic!("Syntax error. Extra ')'.");
                     }
                     else {
-                        done = true;
+                        break;
                     }
                 }
-                Some(c) if c == '*' => {
+                '*' => {
                     // Pop the previous node and nest it under a
                     // repeat node.
                     let n = grp.get_seq()
@@ -109,13 +108,11 @@ impl Regex {
                     });
                     grp.get_seq().push(rpt);
                 }
-                Some(c) => {
-                    // Simple character. Just push it on the
+                c => {
+                    // Char literal. Just push it on the
                     // current senquence.
                     grp.get_seq().push_char(c);
                 }
-                // We're done!
-                None => { done = true; }
             }
         }
         grp
