@@ -1,12 +1,13 @@
 /**
  * Tyler Hardin
- * 2/10/2016
+ * 8/29/2016
  *
  * A simple regex library. Only supports groups, alternatives, sequences,
  * repeats, and literal chars.
  */
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeSet,BTreeMap};
+use std::fmt;
 use std::rc::Rc;
 use std::str::Chars;
 
@@ -29,7 +30,7 @@ impl Regex {
      */
     pub fn from_str(s : &str) -> Regex {
         Regex {
-            root : Regex::parse(&mut s.chars(), &mut 0, true)
+            root : GrpNode::parse(&mut s.chars(), &mut 0, true)
         }
     }
 
@@ -59,82 +60,15 @@ impl Regex {
         }
         else {
             None
-        } 
-     }
-
-    /**
-     * Helper function for Regex::from_chars. Does the actual parsing. The
-     * type hierarchy goes:
-     * group > alternation > sequence > (group or repeat or char).
-     *
-     * Returns the root node, a group, of the string passed.
-     *
-     * * itr - pointer to current position in regex string
-     * * num - current group number (used to keep track of group numbers)
-     */
-    fn parse(itr : &mut Chars, num : &mut usize, root : bool) -> GrpNode {
-        let mut grp = GrpNode {
-            num : *num,
-            alt : AltNode {
-                alts : vec!(SeqNode {
-                    nodes : Vec::new()
-                })
-            }
-        };
-
-        while let Some(c) = itr.next() {
-            match c {
-                '(' => {
-                    // Parse this nested group.
-                    *num += 1;
-                    grp.get_seq().push_grp(Regex::parse(itr, num, false));
-                }
-                '|' => {
-                    // Create a new alternative sequence.
-                    grp.add_alt();
-                }
-                ')' => {
-                    // lparens should always be removed by the
-                    // subgroup parse. So this must be an error.
-                    if root {
-                        panic!("Syntax error. Extra ')'.");
-                    }
-                    else {
-                        break;
-                    }
-                }
-                '*' => {
-                    // Pop the previous node and nest it under a
-                    // repeat node.
-                    let n = grp.get_seq()
-                        .pop()
-                        .expect("Syntax error. * requires a preceeding node.");
-                    let rpt = Rc::new(RptNode {
-                        node : n
-                    });
-                    grp.get_seq().push(rpt);
-                }
-                '+' => {
-                    // Clone the previous node and add a RptNode after it.
-                    let n = grp.get_seq()
-                        .clone_back()
-                        .expect("Syntax error. + requires a preceeding node.");
-                    let rpt = Rc::new(RptNode {
-                        node : n
-                    });
-                    grp.get_seq().push(rpt);
-                }
-                c => {
-                    // Char literal. Just push it on the
-                    // current senquence.
-                    grp.get_seq().push_char(c);
-                }
-            }
         }
-        grp
-    }
+     }
 }
 
+impl fmt::Debug for Regex {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Regex {}", self.root.debug())
+    }
+}
 
 /// Interface for regex tree nodes.
 trait Node {
@@ -163,6 +97,12 @@ struct AltNode {
 /// Represents a char literal.
 struct CharNode {
     c : char
+}
+
+/// Represents a character class.
+struct CharClassNode {
+    elems : BTreeSet<char>,
+    negated : bool
 }
 
 /// Represents a group.
@@ -229,6 +169,39 @@ impl Node for CharNode {
     }
 }
 
+impl Node for CharClassNode {
+    fn match_chars(&self, itr : &mut Chars, _ : &mut MatchResult) -> Option<String> {
+        if let Some(c) = itr.next() {
+            let in_elems = self.elems.contains(&c);
+            if (self.negated && !in_elems) || (!self.negated && in_elems) {
+                Some(c.to_string())
+            }
+            else {
+                None
+            }
+        }
+        else {
+            None
+        }
+    }
+
+    fn debug(&self) -> String {
+        let mut s = String::new();
+        s.push_str("[");
+
+        if self.negated {
+            s.push_str("^");
+        }
+
+        for c in &self.elems {
+            s.push(*c);
+        }
+
+        s.push_str("]");
+        s
+    }
+}
+
 impl Node for GrpNode {
     fn match_chars(&self, itr : &mut Chars, mr : &mut MatchResult) -> Option<String> {
         let res = self.alt.match_chars(itr, mr);
@@ -245,7 +218,6 @@ impl Node for GrpNode {
 
     fn debug(&self) -> String {
         let mut s = String::new();
-        s.push_str("Grp{");
 
         // Dont print parens around the entire regex, they are implicit.
         if self.num == 0 {
@@ -256,7 +228,6 @@ impl Node for GrpNode {
             s = s + &self.alt.debug();
             s.push_str(")");
         }
-        s.push_str("}");
         return s;
     }
 }
@@ -318,7 +289,139 @@ impl Node for SeqNode {
     }
 }
 
+impl CharClassNode {
+    fn parse(itr : &mut Chars) -> Self {
+        let mut elems = BTreeSet::new();
+        let mut negated = false;
+
+        match itr.next() {
+            Some(c) if c == '^' => { negated = true; }
+            Some(c) if c == ']' => { panic!("Syntax error. Empty char class."); }
+            Some(c) => { elems.insert(c); }
+            None => { panic!("Syntax error. Unterminated char class."); }
+        }
+
+        let mut done = false;
+        while let Some(c) = itr.next() {
+            if c == ']' {
+                done = true;
+                break;
+            }
+            else {
+                elems.insert(c);
+            }
+        }
+
+        if !done {
+            panic!("Syntax error. Unterminated char class.");
+        } else if elems.is_empty() {
+            panic!("Syntax error. Empty char class.");
+        }
+
+        CharClassNode {
+            elems : elems,
+            negated : negated
+        }
+    }
+
+    fn from_vec(elems : Vec<char>, negated : bool) -> CharClassNode {
+        CharClassNode {
+            elems : elems.iter().cloned().collect(),
+            negated : negated
+        }
+    }
+}
+
 impl GrpNode {
+    /**
+     * Helper function for Regex constructors. Does the actual parsing. The
+     * type hierarchy goes:
+     * group > alternation > sequence > (group or repeat or char).
+     *
+     * Returns the root node, a group, of the string passed.
+     *
+     * * itr - pointer to current position in regex string
+     * * num - current group number (used to keep track of group numbers)
+     */
+    fn parse(itr : &mut Chars, num : &mut usize, root : bool) -> Self {
+        let mut grp = GrpNode {
+            num : *num,
+            alt : AltNode {
+                alts : vec!(SeqNode {
+                    nodes : Vec::new()
+                })
+            }
+        };
+
+        while let Some(c) = itr.next() {
+            match c {
+                '(' => {
+                    // Parse this nested group.
+                    *num += 1;
+                    grp.get_seq().push_grp(GrpNode::parse(itr, num, false));
+                }
+                '|' => {
+                    // Create a new alternative sequence.
+                    grp.add_alt();
+                }
+                ')' => {
+                    // lparens should always be removed by the
+                    // subgroup parse. So this must be an error.
+                    if root {
+                        panic!("Syntax error. Extra ')'.");
+                    }
+                    else {
+                        break;
+                    }
+                }
+                '*' => {
+                    // Pop the previous node and nest it under a
+                    // repeat node.
+                    let n = grp.get_seq()
+                        .pop()
+                        .expect("Syntax error. * requires a preceeding node.");
+                    let rpt = Rc::new(RptNode {
+                        node : n
+                    });
+                    grp.get_seq().push(rpt);
+                }
+                '+' => {
+                    // Clone the previous node and add a RptNode after it.
+                    let n = grp.get_seq()
+                        .clone_back()
+                        .expect("Syntax error. + requires a preceeding node.");
+                    let rpt = Rc::new(RptNode {
+                        node : n
+                    });
+                    grp.get_seq().push(rpt);
+                }
+                '[' => {
+                    let n = Rc::new(CharClassNode::parse(itr));
+                    grp.get_seq().push(n);
+                }
+                '\\' => {
+                    if let Some(c) = itr.next() {
+                        if let Some(node) = parse_escape(c) {
+                            grp.get_seq().push(node);
+                        }
+                        else {
+                            panic!("Syntax error. Invalid escape.");
+                        }
+                    }
+                    else {
+                        panic!("Syntax error. Expected char following escape.");
+                    }
+                }
+                c => {
+                    // Char literal. Just push it on the
+                    // current senquence.
+                    grp.get_seq().push_char(c);
+                }
+            }
+        }
+        grp
+    }
+
     fn add_alt(&mut self) {
         self.alt.alts.push(SeqNode {
             nodes : Vec::new()
@@ -328,6 +431,19 @@ impl GrpNode {
     fn get_seq(&mut self) -> &mut SeqNode {
         let len = self.alt.alts.len();
         return self.alt.alts.get_mut(len - 1).expect("");
+    }
+}
+
+/**
+ * Parses the char following an escape ('/').
+ */
+fn parse_escape(c : char) -> Option<Rc<Node>> {
+    match c {
+        's' => Some(Rc::new(CharClassNode::from_vec(vec!(' ', '\t'), false))),
+        'S' => Some(Rc::new(CharClassNode::from_vec(vec!(' ', '\t'), true))),
+        't' => Some(Rc::new(CharNode { c : '\t' })),
+        '\\'|'('|')'|'['|']'|'*'|'+' => Some(Rc::new(CharNode { c : c })),
+        _ => None
     }
 }
 
@@ -359,57 +475,77 @@ impl SeqNode {
     }
 }
 
+#[cfg(test)]
+fn test_match(r : &str, testcase : &str) {
+    let regex = Regex::from_str(r);
+    assert!(regex.match_str(testcase).is_some());
+}
+
+#[cfg(test)]
+fn test_result(r : &str, testcase : &str, mut mr : MatchResult) {
+    let regex = Regex::from_str(r);
+    mr.insert(0, testcase.to_string());
+    println!("Regex: {:?}", regex);
+
+    let res = regex.match_str(testcase);
+    println!("Expected result: {:?}", &mr);
+    println!("Actual result: {:?}", &res);
+
+    assert!(res == Some(mr));
+}
+
+#[test]
+fn test_escape_escape() {
+    test_match("\\\\", "\\");
+}
+
+#[test]
+fn test_tab() {
+    test_match("\t", "\t");
+    test_match("\\t", "\t");
+}
+
 #[test]
 fn test_star() {
     let mut mr = MatchResult::new();
-    let regex = Regex::from_str("(a*)bc");
-
-    mr.insert(0, "aabc".to_string());
     mr.insert(1, "aa".to_string());
-
-    assert!(regex.match_str("aabc") == Some(mr));
+    test_result("(a*)bc", "aabc", mr);
 }
 
 #[test]
 fn test_plus() {
     let mut mr = MatchResult::new();
-    let regex = Regex::from_str("(a+)b");
-
-    mr.insert(0, "aaab".to_string());
     mr.insert(1, "aaa".to_string());
-
-    assert!(regex.match_str("aaab") == Some(mr));
-
-    // Check that it doesn't match nothing.
-    assert!(regex.match_str("b") == None);
+    test_result("(a+)b", "aaab", mr);
 }
 
 #[test]
 fn test_groups() {
     let mut mr = MatchResult::new();
-    let regex = Regex::from_str("(a(b|c))b((c|d)*)");
-
-    mr.insert(0, "acbcdcdd".to_string());
     mr.insert(1, "ac".to_string());
     mr.insert(2, "c".to_string());
     mr.insert(3, "cdcdd".to_string());
     mr.insert(4, "d".to_string());
-
-    let res = regex.match_str("acbcdcdd");
-    assert!(res == Some(mr));
+    test_result("(a(b|c))b((c|d)*)", "acbcdcdd", mr);
 }
 
 #[test]
 fn test_alts() {
     let mut mr = MatchResult::new();
-    let regex = Regex::from_str("(a(b|c)*)|((c|d)*)");
-
-    mr.insert(0, "cdcdd".to_string());
     mr.insert(3, "cdcdd".to_string());
     mr.insert(4, "d".to_string());
+    test_result("(a(b|c)*)|((c|d)*)", "cdcdd", mr);
+}
 
-    let res = regex.match_str("cdcdd");
+#[test]
+fn test_char_class() {
+    let mut mr = MatchResult::new();
+    mr.insert(1, "a".to_string());
+    mr.insert(2, "z".to_string());
+    test_result("([abc])([xyz])", "az", mr);
+}
 
-    println!("{:?}", res);
-    assert!(res == Some(mr));
+#[test]
+fn test_char_class_negated() {
+    test_result("[^z]", "a", MatchResult::new());
 }
