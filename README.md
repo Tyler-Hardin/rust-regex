@@ -1,4 +1,4 @@
-This library implements an API for (a small subset of) regular expressions. It supports groups, alternatives, sequences, * repeats, and character literals. It only supports matching (a whole string) and not searching within a string.
+This library implements an API for (a small subset of) regular expressions. It supports groups, alternatives, sequences, * and + repeats, and character literals. It only supports matching (a whole string) and not searching within a string.
 
 A usage example:
 

@@ -7,6 +7,7 @@
  */
 
 use std::collections::BTreeMap;
+use std::rc::Rc;
 use std::str::Chars;
 
 /**
@@ -49,10 +50,10 @@ impl Regex {
 
         // Did it match and did it match the whole string?
         if res.is_some() && itr.count() == 0 {
-            return Some(mr);
+            Some(mr)
         }
         else {
-            return None;
+            None
         }
     }
 
@@ -102,8 +103,18 @@ impl Regex {
                     // repeat node.
                     let n = grp.get_seq()
                         .pop()
-                        .expect("Syntax error. * requires a preceeding node");
-                    let rpt = Box::new(RptNode {
+                        .expect("Syntax error. * requires a preceeding node.");
+                    let rpt = Rc::new(RptNode {
+                        node : n
+                    });
+                    grp.get_seq().push(rpt);
+                }
+                '+' => {
+                    // Clone the previous node and add a RptNode after it.
+                    let n = grp.get_seq()
+                        .clone_back()
+                        .expect("Syntax error. + requires a preceeding node.");
+                    let rpt = Rc::new(RptNode {
                         node : n
                     });
                     grp.get_seq().push(rpt);
@@ -155,12 +166,12 @@ struct GrpNode {
 
 // Represents a *.
 struct RptNode {
-    node : Box<Node>
+    node : Rc<Node>
 }
 
 // Represents a sequence.
 struct SeqNode {
-    nodes : Vec<Box<Node>>
+    nodes : Vec<Rc<Node>>
 }
 
 impl Node for AltNode {
@@ -196,10 +207,10 @@ impl Node for AltNode {
 
 impl Node for CharNode {
     fn m(&self, itr : &mut Chars, _ : &mut MatchResult) -> Option<String> {
-        return match itr.next() {
+        match itr.next() {
             Some(c) if c == self.c => { Some(c.to_string()) }
             _ => { None }
-        };
+        }
     }
 
     fn debug(&self) -> String {
@@ -315,24 +326,34 @@ impl GrpNode {
 
 impl SeqNode {
     fn push_char(&mut self, c : char) {
-        self.nodes.push(Box::new(CharNode { c : c }));
+        self.nodes.push(Rc::new(CharNode { c : c }));
     }
 
     fn push_grp(&mut self, grp : GrpNode) {
-        self.nodes.push(Box::new(grp));
+        self.nodes.push(Rc::new(grp));
     }
 
-    fn push(&mut self, node : Box<Node>) {
+    fn push(&mut self, node : Rc<Node>) {
         self.nodes.push(node);
     }
 
-    fn pop(&mut self) -> Option<Box<Node>> {
+    fn pop(&mut self) -> Option<Rc<Node>> {
         self.nodes.pop()
+    }
+
+    fn clone_back(&self) -> Option<Rc<Node>> {
+        let len = self.nodes.len();
+        if let Some(node) = self.nodes.get(len - 1) {
+            Some(node.clone())
+        }
+        else {
+            None
+        }
     }
 }
 
 #[test]
-fn test_repeat() {
+fn test_star() {
     let mut mr = MatchResult::new();
     let regex = Regex::from_str("(a*)bc");
 
@@ -340,6 +361,20 @@ fn test_repeat() {
     mr.insert(1, "aa".to_string());
 
     assert!(regex.match_str("aabc") == Some(mr));
+}
+
+#[test]
+fn test_plus() {
+    let mut mr = MatchResult::new();
+    let regex = Regex::from_str("(a+)b");
+
+    mr.insert(0, "aaab".to_string());
+    mr.insert(1, "aaa".to_string());
+
+    assert!(regex.match_str("aaab") == Some(mr));
+
+    // Check that it doesn't match nothing.
+    assert!(regex.match_str("b") == None);
 }
 
 #[test]
