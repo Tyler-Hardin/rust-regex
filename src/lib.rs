@@ -37,12 +37,21 @@ impl Regex {
      * Matches a str against a regex.
      *
      * * regex - the regular expression
-     * * itr -  an iterator for the string to match
+     * * s     - a str to match
      */
     pub fn match_str(&self, s : &str) -> Option<MatchResult> {
-        let mut itr = s.chars();
+        self.match_chars(&mut s.chars())
+    }
+
+    /**
+     * Matches a char iterator against a regex.
+     *
+     * * regex - the regular expression
+     * * itr   - an iterator to match
+     */
+     pub fn match_chars(&self, itr : &mut Chars) -> Option<MatchResult> {
         let mut mr = MatchResult::new();
-        let res = self.root.m(&mut itr, &mut mr);
+        let res = self.root.match_chars(itr, &mut mr);
 
         // Did it match and did it match the whole string?
         if res.is_some() && itr.count() == 0 {
@@ -50,8 +59,8 @@ impl Regex {
         }
         else {
             None
-        }
-    }
+        } 
+     }
 
     /**
      * Helper function for Regex::from_chars. Does the actual parsing. The
@@ -78,8 +87,7 @@ impl Regex {
                 '(' => {
                     // Parse this nested group.
                     *num += 1;
-                    let new_grp = Regex::parse(itr, num, false);
-                    grp.get_seq().push_grp(new_grp);
+                    grp.get_seq().push_grp(Regex::parse(itr, num, false));
                 }
                 '|' => {
                     // Create a new alternative sequence.
@@ -139,7 +147,7 @@ trait Node {
      * * itr -  current position in the string
      * * mr  -  MatchResult in which to store group matches
      */
-    fn m(&self, &mut Chars, &mut MatchResult) -> Option<String>;
+    fn match_chars(&self, &mut Chars, &mut MatchResult) -> Option<String>;
 
     /**
      * Prints this node in normal regex syntax.
@@ -174,14 +182,14 @@ struct SeqNode {
 }
 
 impl Node for AltNode {
-    fn m(&self, itr : &mut Chars, mr : &mut MatchResult) -> Option<String> {
+    fn match_chars(&self, itr : &mut Chars, mr : &mut MatchResult) -> Option<String> {
         // Try each alternative.
         for alt in &self.alts {
             // Store for backtracking.
             let mut clone = itr.clone();
 
             // Return the first successful match.
-            let res = alt.m(&mut clone, mr);
+            let res = alt.match_chars(&mut clone, mr);
             if res.is_some() {
                 itr.clone_from(&clone);
                 return res;
@@ -205,7 +213,7 @@ impl Node for AltNode {
 }
 
 impl Node for CharNode {
-    fn m(&self, itr : &mut Chars, _ : &mut MatchResult) -> Option<String> {
+    fn match_chars(&self, itr : &mut Chars, _ : &mut MatchResult) -> Option<String> {
         match itr.next() {
             Some(c) if c == self.c => { Some(c.to_string()) }
             _ => { None }
@@ -222,8 +230,8 @@ impl Node for CharNode {
 }
 
 impl Node for GrpNode {
-    fn m(&self, itr : &mut Chars, mr : &mut MatchResult) -> Option<String> {
-        let res = self.alt.m(itr, mr);
+    fn match_chars(&self, itr : &mut Chars, mr : &mut MatchResult) -> Option<String> {
+        let res = self.alt.match_chars(itr, mr);
 
         match res {
             Some(ref s) => {
@@ -254,11 +262,11 @@ impl Node for GrpNode {
 }
 
 impl Node for RptNode {
-    fn m(&self, itr : &mut Chars, mr : &mut MatchResult) -> Option<String> {
+    fn match_chars(&self, itr : &mut Chars, mr : &mut MatchResult) -> Option<String> {
         let mut clone = itr.clone();
         let mut out = String::new();
 
-        let mut res = self.node.m(itr, mr);
+        let mut res = self.node.match_chars(itr, mr);
         while res.is_some() {
             // Store file position for backtracking.
             clone.clone_from(itr);
@@ -267,7 +275,7 @@ impl Node for RptNode {
             out = out + &res.expect("");
 
             // Try to match again.
-            res = self.node.m(itr, mr);
+            res = self.node.match_chars(itr, mr);
         }
 
         // Backtrack to the point after the last successful match.
@@ -284,11 +292,11 @@ impl Node for RptNode {
 }
 
 impl Node for SeqNode {
-    fn m(&self, itr : &mut Chars, mr : &mut MatchResult) -> Option<String> {
+    fn match_chars(&self, itr : &mut Chars, mr : &mut MatchResult) -> Option<String> {
         let mut out = String::new();
 
         for n in &self.nodes {
-            let res = n.m(itr, mr);
+            let res = n.match_chars(itr, mr);
             if res.is_some() {
                 out = out + &res.expect("");
             }
