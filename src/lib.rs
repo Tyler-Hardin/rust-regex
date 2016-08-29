@@ -1,8 +1,8 @@
 /**
  * Tyler Hardin
  * 2/10/2016
- * 
- * A simple regex library. Only supports groups, alternatives, sequences, 
+ *
+ * A simple regex library. Only supports groups, alternatives, sequences,
  * repeats, and literal chars.
  */
 
@@ -26,9 +26,6 @@ impl Regex {
     /**
      * Creates a regex from a str that represents a regex. Panics if the
      * regex is not well-formed.
-     *
-     * @param c the charater iterator
-     * @returns the regex
      */
     pub fn from_str(s : &str) -> Regex {
         Regex {
@@ -39,9 +36,8 @@ impl Regex {
     /**
      * Matches a str against a regex.
      *
-     * @param regex the regular expression
-     * @param itr   an iterator for the string to match
-     * @returns an Option for whether the string matched and a MatchResult
+     * * regex - the regular expression
+     * * itr -  an iterator for the string to match
      */
     pub fn match_str(&self, s : &str) -> Option<MatchResult> {
         let mut itr = s.chars();
@@ -62,9 +58,10 @@ impl Regex {
      * type hierarchy goes:
      * group > alternation > sequence > (group or repeat or char).
      *
-     * @param itr   pointer to current position in regex string
-     * @param num   current group number (used to keep track of group numbers)
-     * @returns a GrpNode of the group parsed.
+     * Returns the root node, a group, of the string passed.
+     *
+     * * itr - pointer to current position in regex string
+     * * num - current group number (used to keep track of group numbers)
      */
     fn parse(itr : &mut Chars, num : &mut usize, root : bool) -> GrpNode {
         let mut grp = GrpNode {
@@ -131,14 +128,16 @@ impl Regex {
 }
 
 
-// Interface for regex tree nodes.
+/// Interface for regex tree nodes.
 trait Node {
     /**
-     * Matches this node against (part of) a string
+     * Matches this node against (part of) a string. The match must start at
+     * the first char of itr.
      *
-     * @param itr   current position in the string
-     * @mr  MatchResult in which to store group matches
-     * @returns what this node matched
+     * Returns the string that the node matched.
+     *
+     * * itr -  current position in the string
+     * * mr  -  MatchResult in which to store group matches
      */
     fn m(&self, &mut Chars, &mut MatchResult) -> Option<String>;
 
@@ -148,28 +147,28 @@ trait Node {
     fn debug(&self) -> String;
 }
 
-// Represents alternation.
+/// Represents an alternation.
 struct AltNode {
     alts : Vec<SeqNode>
 }
 
-// Represents a character.
+/// Represents a char literal.
 struct CharNode {
     c : char
 }
 
-// Represents a group.
+/// Represents a group.
 struct GrpNode {
     num : usize,
     alt : AltNode
 }
 
-// Represents a *.
+/// Represents a *.
 struct RptNode {
     node : Rc<Node>
 }
 
-// Represents a sequence.
+/// Represents a sequence.
 struct SeqNode {
     nodes : Vec<Rc<Node>>
 }
