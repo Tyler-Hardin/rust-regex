@@ -57,8 +57,7 @@ impl Regex {
         // Did it match and did it match the whole string?
         if res.is_some() && itr.count() == 0 {
             Some(mr)
-        }
-        else {
+        } else {
             None
         }
      }
@@ -91,33 +90,41 @@ trait Node {
 
 /// Represents an alternation.
 struct AltNode {
+    /// A vec of alternative sequences.
     alts : Vec<SeqNode>
 }
 
 /// Represents a char literal.
 struct CharNode {
+    /// The char literal this node represents.
     c : char
 }
 
 /// Represents a character class.
 struct CharClassNode {
+    /// Elements matched by this class.
     elems : BTreeSet<char>,
+    /// Whether the class is negated.
     negated : bool
 }
 
 /// Represents a group.
 struct GrpNode {
+    /// The number of this group.
     num : usize,
+    /// The list of alternative sequences.
     alt : AltNode
 }
 
 /// Represents a *.
 struct RptNode {
+    /// The node to be repeated.
     node : Rc<Node>
 }
 
 /// Represents a sequence.
 struct SeqNode {
+    /// Nodes that together form a sequence.
     nodes : Vec<Rc<Node>>
 }
 
@@ -175,12 +182,10 @@ impl Node for CharClassNode {
             let in_elems = self.elems.contains(&c);
             if (self.negated && !in_elems) || (!self.negated && in_elems) {
                 Some(c.to_string())
-            }
-            else {
+            } else {
                 None
             }
-        }
-        else {
+        } else {
             None
         }
     }
@@ -222,8 +227,7 @@ impl Node for GrpNode {
         // Dont print parens around the entire regex, they are implicit.
         if self.num == 0 {
             s = self.alt.debug();
-        }
-        else {
+        } else {
             s.push_str("(");
             s = s + &self.alt.debug();
             s.push_str(")");
@@ -270,8 +274,7 @@ impl Node for SeqNode {
             let res = n.match_chars(itr, mr);
             if res.is_some() {
                 out = out + &res.expect("");
-            }
-            else {
+            } else {
                 return None;
             }
         }
@@ -290,13 +293,26 @@ impl Node for SeqNode {
 }
 
 impl CharClassNode {
-    fn parse(itr : &mut Chars) -> Self {
+    fn parse(mut itr : &mut Chars) -> Self {
         let mut elems = BTreeSet::new();
         let mut negated = false;
+
+        let handle_escape = |itr : &mut Chars, elems : &mut BTreeSet<char>| {
+            if let Some(next) = itr.next() {
+                if let Some(mapping) = parse_escape_char(next) {
+                    elems.insert(mapping);
+                } else {
+                    panic!("Syntax error. Invalid escape.");
+                }
+            } else {
+                panic!("Syntax error. Expected char following escape.");
+            }
+        };
 
         match itr.next() {
             Some(c) if c == '^' => { negated = true; }
             Some(c) if c == ']' => { panic!("Syntax error. Empty char class."); }
+            Some(c) if c == '\\' => { handle_escape(&mut itr, &mut elems); }
             Some(c) => { elems.insert(c); }
             None => { panic!("Syntax error. Unterminated char class."); }
         }
@@ -306,8 +322,9 @@ impl CharClassNode {
             if c == ']' {
                 done = true;
                 break;
-            }
-            else {
+            } else if c == '\\' {
+                handle_escape(itr, &mut elems);
+            } else {
                 elems.insert(c);
             }
         }
@@ -369,8 +386,7 @@ impl GrpNode {
                     // subgroup parse. So this must be an error.
                     if root {
                         panic!("Syntax error. Extra ')'.");
-                    }
-                    else {
+                    } else {
                         break;
                     }
                 }
@@ -403,12 +419,10 @@ impl GrpNode {
                     if let Some(c) = itr.next() {
                         if let Some(node) = parse_escape(c) {
                             grp.get_seq().push(node);
-                        }
-                        else {
+                        } else {
                             panic!("Syntax error. Invalid escape.");
                         }
-                    }
-                    else {
+                    } else {
                         panic!("Syntax error. Expected char following escape.");
                     }
                 }
@@ -435,15 +449,33 @@ impl GrpNode {
 }
 
 /**
- * Parses the char following an escape ('/').
+ * Parses the char following an escape, but restricts matches to those which
+ * map directly to a another char (rather than, e.g., full nodes like a char
+ * class).
+ */
+fn parse_escape_char(c : char) -> Option<char> {
+    match c {
+        '\\'|'('|')'|'['|']'|'*'|'+'|'^' => Some(c),
+        't' => Some('\t'),
+        _   => None
+    }
+}
+
+/**
+ * Parses the char following an escape ('/'), allowing any result. (This is 
+ * used outside of character classes.)
  */
 fn parse_escape(c : char) -> Option<Rc<Node>> {
     match c {
         's' => Some(Rc::new(CharClassNode::from_vec(vec!(' ', '\t'), false))),
         'S' => Some(Rc::new(CharClassNode::from_vec(vec!(' ', '\t'), true))),
-        't' => Some(Rc::new(CharNode { c : '\t' })),
-        '\\'|'('|')'|'['|']'|'*'|'+' => Some(Rc::new(CharNode { c : c })),
-        _ => None
+        c   => {
+            if let Some(c) = parse_escape_char(c) {
+                Some(Rc::new(CharNode { c : c}))
+            } else { 
+                None 
+            }
+        }
     }
 }
 
@@ -468,8 +500,7 @@ impl SeqNode {
         let len = self.nodes.len();
         if let Some(node) = self.nodes.get(len - 1) {
             Some(node.clone())
-        }
-        else {
+        } else {
             None
         }
     }
@@ -503,6 +534,12 @@ fn test_escape_escape() {
 fn test_tab() {
     test_match("\t", "\t");
     test_match("\\t", "\t");
+}
+
+#[test]
+fn test_char_class_escape() {
+    test_match("[\\t]", "\t");
+    test_match("[\\^]", "^");
 }
 
 #[test]
